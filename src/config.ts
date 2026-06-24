@@ -1,0 +1,60 @@
+import "dotenv/config";
+import bs58 from "bs58";
+import { Keypair, PublicKey } from "@solana/web3.js";
+
+export type DistributionMode = "proportional" | "equal";
+export type TreasuryBase = "SOL" | "USDC";
+
+function required(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+function bool(name: string, fallback = false): boolean {
+  const value = process.env[name]?.trim();
+  if (!value) return fallback;
+  return value.toLowerCase() === "true";
+}
+
+function numberEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  const value = raw ? Number(raw) : fallback;
+  if (!Number.isFinite(value)) throw new Error(`${name} must be a number`);
+  return value;
+}
+
+export function treasuryKeypair(): Keypair {
+  const raw = required("TREASURY_WALLET_SECRET");
+  const bytes = raw.startsWith("[")
+    ? Uint8Array.from(JSON.parse(raw))
+    : bs58.decode(raw);
+  if (bytes.length === 64) return Keypair.fromSecretKey(bytes);
+  if (bytes.length === 32) return Keypair.fromSeed(bytes);
+  throw new Error("TREASURY_WALLET_SECRET must decode to 32 or 64 bytes");
+}
+
+export const config = {
+  heliusRpcUrl: required("HELIUS_RPC_URL"),
+  mcjobMint: new PublicKey(required("MCJOB_MINT")),
+  mcdxMint: new PublicKey(required("MCDX_MINT")),
+  treasuryBase: (process.env.TREASURY_BASE?.trim() || "SOL") as TreasuryBase,
+  supabaseUrl: required("SUPABASE_URL"),
+  supabaseServiceRole: required("SUPABASE_SERVICE_ROLE"),
+  buyEnabled: bool("BUY_ENABLED", false),
+  airdropEnabled: bool("AIRDROP_ENABLED", false),
+  minTreasuryToRun: numberEnv("MIN_TREASURY_TO_RUN", 0.01),
+  maxWalletsPerEpoch: numberEnv("MAX_WALLETS_PER_EPOCH", 500),
+  eligibilityMin: numberEnv("ELIGIBILITY_MIN", 1_000_000),
+  distributionMode: (process.env.DISTRIBUTION_MODE?.trim() || "proportional") as DistributionMode,
+  swapSlippageBps: numberEnv("SWAP_SLIPPAGE_BPS", 300),
+  solReserve: numberEnv("SOL_RESERVE", 0.05)
+};
+
+if (!["SOL", "USDC"].includes(config.treasuryBase)) {
+  throw new Error("TREASURY_BASE must be SOL or USDC");
+}
+
+if (!["proportional", "equal"].includes(config.distributionMode)) {
+  throw new Error("DISTRIBUTION_MODE must be proportional or equal");
+}

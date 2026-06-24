@@ -1,0 +1,90 @@
+# McJob 5-Minute Airdrop Worker
+
+Standalone Railway worker for `$MCJOB` holder rewards. Every 5 minutes it:
+
+1. snapshots eligible `$MCJOB` holders,
+2. buys MCDx with treasury base funds,
+3. computes rewards,
+4. airdrops MCDx,
+5. writes proof and idempotency records to Supabase.
+
+Both live money-moving switches default to `false`.
+
+## Safety Model
+
+- `BUY_ENABLED=false`: the worker logs the Jupiter quote but does not swap.
+- `AIRDROP_ENABLED=false`: the worker logs computed payouts but does not send.
+- Idempotency key: `${epoch_id}:${wallet}`.
+- Each epoch is floored to a 5-minute UTC timestamp.
+- The in-process lock prevents overlapping epochs in one Railway process.
+- Missing `HELIUS_RPC_URL` fails loudly. There is no public RPC fallback.
+
+## Setup
+
+```bash
+npm install
+cp .env.example .env
+```
+
+Fill `.env` locally or in Railway:
+
+```env
+HELIUS_RPC_URL=
+MCJOB_MINT=
+MCDX_MINT=XsqE9cRRpzxcGKDXj1BJ7Xmg4GRhZoyY1KpmGSxAWT2
+TREASURY_WALLET_SECRET=
+TREASURY_BASE=SOL
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE=
+AIRDROP_ENABLED=false
+BUY_ENABLED=false
+MIN_TREASURY_TO_RUN=0.01
+MAX_WALLETS_PER_EPOCH=500
+ELIGIBILITY_MIN=1000000
+DISTRIBUTION_MODE=proportional
+SWAP_SLIPPAGE_BPS=300
+SOL_RESERVE=0.05
+```
+
+Apply the Supabase migration:
+
+```sql
+-- supabase/migrations/001_airdrop_worker.sql
+```
+
+## Local Dry Run
+
+```bash
+npm run dev
+```
+
+Dry-run logs include:
+
+- eligible holder count,
+- `[DRY-RUN] would buy ...`,
+- `[DRY-RUN] would send ...`.
+
+## Railway Deploy
+
+Create a Railway service from this folder and set the start command:
+
+```bash
+npm start
+```
+
+This is a worker/background process, not a web service.
+
+## Going Live
+
+1. Deploy with both flags false.
+2. Watch dry-run snapshots and computed payouts.
+3. Set `BUY_ENABLED=true`.
+4. Verify one real buy is recorded in `buys`.
+5. Set `AIRDROP_ENABLED=true`.
+6. Verify the first real airdrop tx signatures in `payouts`.
+
+Distribution defaults to proportional by `$MCJOB` balance. To switch to equal split:
+
+```env
+DISTRIBUTION_MODE=equal
+```
