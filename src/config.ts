@@ -61,6 +61,8 @@ export const config = {
   distributionMode: (process.env.DISTRIBUTION_MODE?.trim() || "proportional") as DistributionMode,
   swapSlippageBps: numberEnv("SWAP_SLIPPAGE_BPS", 300),
   gasBufferSol: numberEnv("GAS_BUFFER_SOL", numberEnv("SOL_RESERVE", 0.05)),
+  airdropBatchSize: Math.max(1, Math.floor(numberEnv("AIRDROP_BATCH_SIZE", 4))),
+  airdropSolReserve: numberEnv("AIRDROP_SOL_RESERVE", numberEnv("GAS_BUFFER_SOL", numberEnv("SOL_RESERVE", 0.05))),
   maxHolderPct: numberEnv("MAX_HOLDER_PCT", 4),
   excludeWallets: publicKeyList("EXCLUDE_WALLETS")
 };
