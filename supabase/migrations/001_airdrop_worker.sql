@@ -36,3 +36,10 @@ create table if not exists buys (
   tx_sig text,
   created_at timestamptz not null default now()
 );
+
+create table if not exists claims (
+  epoch_id text primary key references epochs(epoch_id) on delete cascade,
+  amount_claimed numeric not null default 0,
+  tx_sig text,
+  created_at timestamptz not null default now()
+);

@@ -74,6 +74,22 @@ export async function recordBuy(epochId: string, baseSpent: string, mcdxReceived
   assertNoError(result, "record buy");
 }
 
+export async function getClaim(epochId: string) {
+  const result = await supabase
+    .from("claims")
+    .select("*")
+    .eq("epoch_id", epochId)
+    .maybeSingle();
+  return assertNoError(result, "get claim");
+}
+
+export async function recordClaim(epochId: string, amountClaimed: string, txSig: string | null) {
+  const result = await supabase
+    .from("claims")
+    .upsert({ epoch_id: epochId, amount_claimed: amountClaimed, tx_sig: txSig });
+  assertNoError(result, "record claim");
+}
+
 export async function planPayout(epochId: string, wallet: string, amount: string) {
   const idempotencyKey = `${epochId}:${wallet}`;
   const result = await supabase

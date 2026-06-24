@@ -1,6 +1,7 @@
 import { config } from "./config.js";
 import { airdropMcdx, computeAllocations } from "./airdrop.js";
 import { buyMcdx } from "./buy.js";
+import { claimFees } from "./claim.js";
 import {
   completeEpoch,
   failEpoch,
@@ -30,6 +31,11 @@ export async function runEpoch(date = new Date()) {
     }
 
     await startEpoch(epochId);
+    await claimFees(epochId);
+
+    const buy = await buyMcdx(epochId);
+    await recordBuy(epochId, buy.baseSpent.toString(), buy.mcdxReceived.toString(), buy.txSig);
+
     const holders = await snapshotEligibleHolders();
     await persistSnapshot(
       epochId,
@@ -39,9 +45,6 @@ export async function runEpoch(date = new Date()) {
       }))
     );
     console.log(`[${epochId}] snapshot eligible holders: ${holders.length}`);
-
-    const buy = await buyMcdx(epochId);
-    await recordBuy(epochId, buy.baseSpent.toString(), buy.mcdxReceived.toString(), buy.txSig);
 
     if (buy.mcdxReceived <= 0n) {
       await completeEpoch(epochId, {

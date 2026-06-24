@@ -15,13 +15,22 @@ export async function treasuryBaseState(): Promise<{
   minToRun: bigint;
 }> {
   const treasury = treasuryKeypair();
+  const reserve = BigInt(Math.floor(config.gasBufferSol * LAMPORTS_PER_SOL));
   if (config.treasuryBase === "SOL") {
     const balance = await connection.getBalance(treasury.publicKey, "confirmed");
-    const reserve = BigInt(Math.floor(config.solReserve * LAMPORTS_PER_SOL));
     return {
       inputMint: NATIVE_MINT.toBase58(),
       available: BigInt(Math.max(0, balance - Number(reserve))),
       minToRun: BigInt(Math.floor(config.minTreasuryToRun * LAMPORTS_PER_SOL))
+    };
+  }
+
+  const solBalance = BigInt(await connection.getBalance(treasury.publicKey, "confirmed"));
+  if (solBalance < reserve) {
+    return {
+      inputMint: config.usdcMint.toBase58(),
+      available: 0n,
+      minToRun: BigInt(Math.floor(config.minTreasuryToRun * 1_000_000))
     };
   }
 
@@ -72,7 +81,7 @@ export async function buyMcdx(epochId: string): Promise<BuyResult> {
   const treasury = treasuryKeypair();
   const { inputMint, available, minToRun } = await treasuryBaseState();
   if (available < minToRun) {
-    console.log(`[${epochId}] insufficient treasury, skipping buy+airdrop`);
+    console.log(`[${epochId}] insufficient treasury after reserving ${config.gasBufferSol} SOL gas buffer, skipping buy+airdrop`);
     return { baseSpent: 0n, mcdxReceived: 0n, txSig: null };
   }
 
