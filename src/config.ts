@@ -38,6 +38,7 @@ export const config = {
   heliusRpcUrl: required("HELIUS_RPC_URL"),
   mcjobMint: new PublicKey(required("MCJOB_MINT")),
   mcdxMint: new PublicKey(required("MCDX_MINT")),
+  usdcMint: new PublicKey(process.env.USDC_MINT?.trim() || "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
   treasuryBase: (process.env.TREASURY_BASE?.trim() || "SOL") as TreasuryBase,
   supabaseUrl: required("SUPABASE_URL"),
   supabaseServiceRole: required("SUPABASE_SERVICE_ROLE"),

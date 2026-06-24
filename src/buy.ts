@@ -9,21 +9,43 @@ export type BuyResult = {
   txSig: string | null;
 };
 
-export async function availableTreasuryBase(): Promise<bigint> {
-  if (config.treasuryBase !== "SOL") {
-    throw new Error("USDC treasury base is not implemented yet; set TREASURY_BASE=SOL");
-  }
+export async function treasuryBaseState(): Promise<{
+  inputMint: string;
+  available: bigint;
+  minToRun: bigint;
+}> {
   const treasury = treasuryKeypair();
-  const balance = await connection.getBalance(treasury.publicKey, "confirmed");
-  const reserve = BigInt(Math.floor(config.solReserve * LAMPORTS_PER_SOL));
-  return BigInt(Math.max(0, balance - Number(reserve)));
+  if (config.treasuryBase === "SOL") {
+    const balance = await connection.getBalance(treasury.publicKey, "confirmed");
+    const reserve = BigInt(Math.floor(config.solReserve * LAMPORTS_PER_SOL));
+    return {
+      inputMint: NATIVE_MINT.toBase58(),
+      available: BigInt(Math.max(0, balance - Number(reserve))),
+      minToRun: BigInt(Math.floor(config.minTreasuryToRun * LAMPORTS_PER_SOL))
+    };
+  }
+
+  const accounts = await connection.getParsedTokenAccountsByOwner(
+    treasury.publicKey,
+    { mint: config.usdcMint },
+    "confirmed"
+  );
+  const available = accounts.value.reduce((sum, account) => {
+    const amount = account.account.data.parsed?.info?.tokenAmount?.amount;
+    return sum + BigInt(amount ?? "0");
+  }, 0n);
+  return {
+    inputMint: config.usdcMint.toBase58(),
+    available,
+    minToRun: BigInt(Math.floor(config.minTreasuryToRun * 1_000_000))
+  };
 }
 
-async function jupiterSwap(baseLamports: bigint, treasuryPublicKey: string) {
+async function jupiterSwap(inputMint: string, baseAmount: bigint, treasuryPublicKey: string) {
   const query = new URLSearchParams({
-    inputMint: NATIVE_MINT.toBase58(),
+    inputMint,
     outputMint: config.mcdxMint.toBase58(),
-    amount: baseLamports.toString(),
+    amount: baseAmount.toString(),
     slippageBps: String(config.swapSlippageBps),
     restrictIntermediateTokens: "true"
   });
@@ -48,14 +70,13 @@ async function jupiterSwap(baseLamports: bigint, treasuryPublicKey: string) {
 
 export async function buyMcdx(epochId: string): Promise<BuyResult> {
   const treasury = treasuryKeypair();
-  const available = await availableTreasuryBase();
-  const min = BigInt(Math.floor(config.minTreasuryToRun * LAMPORTS_PER_SOL));
-  if (available < min) {
+  const { inputMint, available, minToRun } = await treasuryBaseState();
+  if (available < minToRun) {
     console.log(`[${epochId}] insufficient treasury, skipping buy+airdrop`);
     return { baseSpent: 0n, mcdxReceived: 0n, txSig: null };
   }
 
-  const { quote, swap } = await jupiterSwap(available, treasury.publicKey.toBase58());
+  const { quote, swap } = await jupiterSwap(inputMint, available, treasury.publicKey.toBase58());
   const outAmount = BigInt(quote.outAmount);
   console.log(`[${epochId}] ${config.buyEnabled ? "" : "[DRY-RUN] "}would buy ${outAmount.toString()} raw MCDx for ${available.toString()} lamports`);
 
