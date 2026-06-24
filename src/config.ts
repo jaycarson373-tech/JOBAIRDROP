@@ -24,6 +24,16 @@ function numberEnv(name: string, fallback: number): number {
   return value;
 }
 
+function publicKeyList(name: string): PublicKey[] {
+  const raw = process.env[name]?.trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => new PublicKey(value));
+}
+
 export function treasuryKeypair(): Keypair {
   const raw = required("TREASURY_WALLET_SECRET");
   const bytes = raw.startsWith("[")
@@ -42,6 +52,7 @@ export const config = {
   treasuryBase: (process.env.TREASURY_BASE?.trim() || "SOL") as TreasuryBase,
   supabaseUrl: required("SUPABASE_URL"),
   supabaseServiceRole: required("SUPABASE_SERVICE_ROLE"),
+  claimEnabled: bool("CLAIM_ENABLED", false),
   buyEnabled: bool("BUY_ENABLED", false),
   airdropEnabled: bool("AIRDROP_ENABLED", false),
   minTreasuryToRun: numberEnv("MIN_TREASURY_TO_RUN", 0.01),
@@ -49,7 +60,9 @@ export const config = {
   eligibilityMin: numberEnv("ELIGIBILITY_MIN", 1_000_000),
   distributionMode: (process.env.DISTRIBUTION_MODE?.trim() || "proportional") as DistributionMode,
   swapSlippageBps: numberEnv("SWAP_SLIPPAGE_BPS", 300),
-  solReserve: numberEnv("SOL_RESERVE", 0.05)
+  gasBufferSol: numberEnv("GAS_BUFFER_SOL", numberEnv("SOL_RESERVE", 0.05)),
+  maxHolderPct: numberEnv("MAX_HOLDER_PCT", 4),
+  excludeWallets: publicKeyList("EXCLUDE_WALLETS")
 };
 
 if (!["SOL", "USDC"].includes(config.treasuryBase)) {

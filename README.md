@@ -2,11 +2,12 @@
 
 Standalone Railway worker for `$MCJOB` holder rewards. Every 5 minutes it:
 
-1. snapshots eligible `$MCJOB` holders,
-2. buys MCDx with treasury base funds,
-3. computes rewards,
-4. airdrops MCDx,
-5. writes proof and idempotency records to Supabase.
+1. claims creator fees when enabled,
+2. buys MCDx with treasury base funds while leaving a SOL gas buffer,
+3. snapshots eligible `$MCJOB` holders with whale and pool exclusion,
+4. computes rewards,
+5. airdrops MCDx,
+6. writes proof and idempotency records to Supabase.
 
 Both live money-moving switches default to `false`.
 
@@ -14,6 +15,7 @@ Both live money-moving switches default to `false`.
 
 - `BUY_ENABLED=false`: the worker logs the Jupiter quote but does not swap.
 - `AIRDROP_ENABLED=false`: the worker logs computed payouts but does not send.
+- `CLAIM_ENABLED=false`: the worker logs the creator-fee claim step but does not claim.
 - Idempotency key: `${epoch_id}:${wallet}`.
 - Each epoch is floored to a 5-minute UTC timestamp.
 - The in-process lock prevents overlapping epochs in one Railway process.
@@ -37,6 +39,7 @@ TREASURY_BASE=SOL
 USDC_MINT=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE=
+CLAIM_ENABLED=false
 AIRDROP_ENABLED=false
 BUY_ENABLED=false
 MIN_TREASURY_TO_RUN=0.01
@@ -44,7 +47,9 @@ MAX_WALLETS_PER_EPOCH=500
 ELIGIBILITY_MIN=1000000
 DISTRIBUTION_MODE=proportional
 SWAP_SLIPPAGE_BPS=300
-SOL_RESERVE=0.05
+GAS_BUFFER_SOL=0.05
+MAX_HOLDER_PCT=4
+EXCLUDE_WALLETS=
 ```
 
 Apply the Supabase migration:
