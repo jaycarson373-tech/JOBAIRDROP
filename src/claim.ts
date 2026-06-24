@@ -1,6 +1,4 @@
-import { NATIVE_MINT, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { Transaction } from "@solana/web3.js";
-import { OnlinePumpSdk } from "@pump-fun/pump-sdk";
+import { VersionedTransaction } from "@solana/web3.js";
 import { config, treasuryKeypair } from "./config.js";
 import { getClaim, recordClaim } from "./db.js";
 import { connection } from "./solana.js";
@@ -10,7 +8,13 @@ export type ClaimResult = {
   txSig: string | null;
 };
 
-const sdk = new OnlinePumpSdk(connection);
+async function safeRecordClaim(epochId: string, amountClaimed: string, txSig: string | null) {
+  try {
+    await recordClaim(epochId, amountClaimed, txSig);
+  } catch (error) {
+    console.warn(`[${epochId}] failed to record claim:`, error);
+  }
+}
 
 export async function claimFees(epochId: string): Promise<ClaimResult> {
   const existing = await getClaim(epochId);
@@ -23,43 +27,47 @@ export async function claimFees(epochId: string): Promise<ClaimResult> {
   }
 
   const treasury = treasuryKeypair();
-  const claimable = BigInt(
-    (await sdk.getCreatorVaultBalanceBothPrograms(treasury.publicKey)).toString()
-  );
-  console.log(`[${epochId}] claimable creator fees: ${claimable.toString()} lamports`);
 
   if (!config.claimEnabled) {
-    console.log(`[${epochId}] [DRY-RUN] would claim fees`);
+    console.log(`[${epochId}] [DRY-RUN] would claim creator fees`);
     return { amountClaimed: 0n, txSig: null };
   }
 
-  if (claimable <= 0n) {
-    console.log(`[${epochId}] no creator fees to claim`);
-    await recordClaim(epochId, "0", null);
+  try {
+    const response = await fetch("https://pumpportal.fun/api/trade-local", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        publicKey: treasury.publicKey.toBase58(),
+        action: "collectCreatorFee",
+        priorityFee: 0.000001
+      })
+    });
+
+    if (!response.ok) {
+      console.warn(`[${epochId}] creator-fee claim returned ${response.status}: ${await response.text()}`);
+      await safeRecordClaim(epochId, "0", null);
+      return { amountClaimed: 0n, txSig: null };
+    }
+
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (!bytes.length) {
+      console.log(`[${epochId}] no creator fees to claim`);
+      await safeRecordClaim(epochId, "0", null);
+      return { amountClaimed: 0n, txSig: null };
+    }
+
+    const tx = VersionedTransaction.deserialize(bytes);
+    tx.sign([treasury]);
+
+    const txSig = await connection.sendRawTransaction(tx.serialize(), { maxRetries: 3, skipPreflight: false });
+    await connection.confirmTransaction(txSig, "confirmed");
+    await safeRecordClaim(epochId, "0", txSig);
+    console.log(`[${epochId}] claimed creator fees: ${txSig}`);
+    return { amountClaimed: 0n, txSig };
+  } catch (error) {
+    console.warn(`[${epochId}] creator-fee claim skipped:`, error);
+    await safeRecordClaim(epochId, "0", null);
     return { amountClaimed: 0n, txSig: null };
   }
-
-  const instructions = await sdk.collectCoinCreatorFeeV2Instructions(
-    treasury.publicKey,
-    NATIVE_MINT,
-    TOKEN_PROGRAM_ID,
-    treasury.publicKey
-  );
-
-  const tx = new Transaction().add(...instructions);
-  tx.feePayer = treasury.publicKey;
-  tx.recentBlockhash = (await connection.getLatestBlockhash("confirmed")).blockhash;
-  tx.sign(treasury);
-
-  const simulation = await connection.simulateTransaction(tx);
-  if (simulation.value.err) {
-    console.error(simulation.value.logs?.join("\n"));
-    throw new Error(`Claim simulation failed: ${JSON.stringify(simulation.value.err)}`);
-  }
-
-  const txSig = await connection.sendRawTransaction(tx.serialize(), { maxRetries: 3, skipPreflight: false });
-  await connection.confirmTransaction(txSig, "confirmed");
-  await recordClaim(epochId, claimable.toString(), txSig);
-  console.log(`[${epochId}] claimed creator fees: ${txSig}`);
-  return { amountClaimed: claimable, txSig };
 }
