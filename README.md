@@ -3,7 +3,7 @@
 Standalone Railway worker for token-holder rewards. Every 5 minutes it:
 
 1. claims creator fees when enabled,
-2. buys the reward token with treasury base funds while leaving a SOL gas buffer,
+2. buys the reward token with treasury SOL while leaving a SOL gas buffer,
 3. snapshots source-token holders with at least `ELIGIBILITY_MIN` whole tokens,
 4. computes rewards,
 5. airdrops the reward token,
@@ -35,8 +35,6 @@ HELIUS_RPC_URL=
 SOURCE_TOKEN_MINT=
 REWARD_TOKEN_MINT=
 TREASURY_WALLET_SECRET=
-TREASURY_BASE=SOL
-USDC_MINT=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE=
 CLAIM_ENABLED=false
