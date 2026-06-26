@@ -64,13 +64,13 @@ async function missingAtaRentLamports(atas: PublicKey[]) {
 
 export async function airdropMcdx(epochId: string, allocations: Allocation[]) {
   const treasury = treasuryKeypair();
-  const tokenProgram = await tokenProgramForMint(config.mcdxMint);
-  const mintInfo = await getMint(connection, config.mcdxMint, "confirmed", tokenProgram);
-  const sourceAta = getAssociatedTokenAddressSync(config.mcdxMint, treasury.publicKey, false, tokenProgram);
+  const tokenProgram = await tokenProgramForMint(config.rewardTokenMint);
+  const mintInfo = await getMint(connection, config.rewardTokenMint, "confirmed", tokenProgram);
+  const sourceAta = getAssociatedTokenAddressSync(config.rewardTokenMint, treasury.publicKey, false, tokenProgram);
 
   console.log(`[${epochId}] proof before send: ${allocations.length} payouts`);
   for (const allocation of allocations) {
-    console.log(`[${epochId}] ${config.airdropEnabled ? "" : "[DRY-RUN] "}would send ${allocation.amount.toString()} raw MCDx to ${allocation.wallet}`);
+    console.log(`[${epochId}] ${config.airdropEnabled ? "" : "[DRY-RUN] "}would send ${allocation.amount.toString()} raw reward tokens to ${allocation.wallet}`);
   }
 
   if (!config.airdropEnabled) {
@@ -85,7 +85,7 @@ export async function airdropMcdx(epochId: string, allocations: Allocation[]) {
     return {
       ...allocation,
       owner,
-      destinationAta: getAssociatedTokenAddressSync(config.mcdxMint, owner, true, tokenProgram, ASSOCIATED_TOKEN_PROGRAM_ID)
+      destinationAta: getAssociatedTokenAddressSync(config.rewardTokenMint, owner, true, tokenProgram, ASSOCIATED_TOKEN_PROGRAM_ID)
     };
   });
 
@@ -123,13 +123,13 @@ export async function airdropMcdx(epochId: string, allocations: Allocation[]) {
             treasury.publicKey,
             allocation.destinationAta,
             allocation.owner,
-            config.mcdxMint,
+            config.rewardTokenMint,
             tokenProgram,
             ASSOCIATED_TOKEN_PROGRAM_ID
           ),
           createTransferCheckedInstruction(
             sourceAta,
-            config.mcdxMint,
+            config.rewardTokenMint,
             allocation.destinationAta,
             treasury.publicKey,
             allocation.amount,

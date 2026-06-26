@@ -51,9 +51,9 @@ function excludedWallets(mintAuthority: PublicKey | null): Set<string> {
   const excluded = new Set<string>();
   addExcluded(excluded, treasuryKeypair().publicKey);
   addExcluded(excluded, mintAuthority);
-  addExcluded(excluded, bondingCurvePda(config.mcjobMint));
-  addExcluded(excluded, bondingCurveV2Pda(config.mcjobMint));
-  addExcluded(excluded, canonicalPoolPda(config.mcjobMint));
+  addExcluded(excluded, bondingCurvePda(config.sourceTokenMint));
+  addExcluded(excluded, bondingCurveV2Pda(config.sourceTokenMint));
+  addExcluded(excluded, canonicalPoolPda(config.sourceTokenMint));
   for (const wallet of config.excludeWallets) {
     addExcluded(excluded, wallet);
   }
@@ -61,15 +61,20 @@ function excludedWallets(mintAuthority: PublicKey | null): Set<string> {
 }
 
 export async function snapshotEligibleHolders(): Promise<Holder[]> {
-  const tokenProgram = await tokenProgramForMint(config.mcjobMint);
-  const mintInfo = await getMint(connection, config.mcjobMint, "confirmed", tokenProgram);
-  const tokenSupply = await connection.getTokenSupply(config.mcjobMint, "confirmed");
+  const tokenProgram = await tokenProgramForMint(config.sourceTokenMint);
+  const mintInfo = await getMint(connection, config.sourceTokenMint, "confirmed", tokenProgram);
+  const tokenSupply = await connection.getTokenSupply(config.sourceTokenMint, "confirmed");
   const totalSupply = BigInt(tokenSupply.value.amount);
-  if (totalSupply <= 0n) throw new Error(`Token supply is zero for ${config.mcjobMint.toBase58()}`);
+  if (totalSupply <= 0n) throw new Error(`Token supply is zero for ${config.sourceTokenMint.toBase58()}`);
   const excluded = excludedWallets(mintInfo.mintAuthority);
+  const filters = tokenProgram.equals(TOKEN_PROGRAM_ID)
+    ? [{ dataSize: 165 }, { memcmp: { offset: 0, bytes: config.sourceTokenMint.toBase58() } }]
+    : [{ memcmp: { offset: 0, bytes: config.sourceTokenMint.toBase58() } }];
   const accounts = await connection.getParsedProgramAccounts(tokenProgram, {
-    filters: [{ memcmp: { offset: 0, bytes: config.mcjobMint.toBase58() } }]
+    filters
   });
+  console.log(`holder query returned ${accounts.length} token accounts for mint ${config.sourceTokenMint.toBase58()}`);
+  console.log(`mint decimals: ${tokenSupply.value.decimals}`);
 
   const balances = new Map<string, bigint>();
   for (const account of accounts) {
@@ -81,26 +86,38 @@ export async function snapshotEligibleHolders(): Promise<Holder[]> {
   }
 
   const decimals = tokenSupply.value.decimals;
-  const minRaw = BigInt(Math.floor(config.eligibilityMin * 10 ** decimals));
+  const aggregatedBalances = [...balances.entries()].map(([wallet, rawBalance]) => ({
+    wallet,
+    rawBalance,
+    uiBalance: Number(rawBalance) / 10 ** decimals
+  }));
+  const eligibleByBalance = aggregatedBalances.filter((holder) => holder.uiBalance >= config.eligibilityMin);
+  console.log(`${eligibleByBalance.length} accounts >= ${config.eligibilityMin} tokens after owner aggregation`);
+
+  if (accounts.length > 0 && eligibleByBalance.length === 0) {
+    const topBalances = [...aggregatedBalances]
+      .sort((a, b) => b.uiBalance - a.uiBalance)
+      .slice(0, 3);
+    console.log(
+      `top 3 balances seen: ${topBalances
+        .map((holder) => `${holder.wallet}=${holder.uiBalance}`)
+        .join(", ")}`
+    );
+  }
+
   const maxHolderNumerator = BigInt(Math.floor(config.maxHolderPct * 10_000));
-  const holders = [...balances.entries()]
-    .filter(([, amount]) => amount >= minRaw)
-    .filter(([wallet]) => !excluded.has(wallet))
-    .filter(([wallet, amount]) => {
-      const pctNumerator = amount * 1_000_000n;
+  const holders = eligibleByBalance
+    .filter((holder) => !excluded.has(holder.wallet))
+    .filter((holder) => {
+      const pctNumerator = holder.rawBalance * 1_000_000n;
       const holderPct = Number(pctNumerator / totalSupply) / 10_000;
-      const isWhale = pctNumerator > totalSupply * maxHolderNumerator;
+      const isWhale = pctNumerator >= totalSupply * maxHolderNumerator;
       if (isWhale) {
-        console.log(`[SNAPSHOT] excluded whale ${wallet}: ${holderPct}%`);
+        console.log(`[SNAPSHOT] excluded holder at/above ${config.maxHolderPct}% ${holder.wallet}: ${holderPct}%`);
       }
       return !isWhale;
     })
-    .sort((a, b) => (a[1] === b[1] ? 0 : a[1] > b[1] ? -1 : 1))
-    .map(([wallet, rawBalance]) => ({
-      wallet,
-      rawBalance,
-      uiBalance: Number(rawBalance) / 10 ** decimals
-    }));
+    .sort((a, b) => (a.rawBalance === b.rawBalance ? 0 : a.rawBalance > b.rawBalance ? -1 : 1));
 
   if (holders.length > config.maxWalletsPerEpoch) {
     console.warn(

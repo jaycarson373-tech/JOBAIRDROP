@@ -11,6 +11,14 @@ function required(name: string): string {
   return value;
 }
 
+function requiredAny(names: string[]): string {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  throw new Error(`${names.join(" or ")} is required`);
+}
+
 function bool(name: string, fallback = false): boolean {
   const value = process.env[name]?.trim();
   if (!value) return fallback;
@@ -44,10 +52,15 @@ export function treasuryKeypair(): Keypair {
   throw new Error("TREASURY_WALLET_SECRET must decode to 32 or 64 bytes");
 }
 
+const sourceTokenMint = new PublicKey(requiredAny(["SOURCE_TOKEN_MINT", "MCJOB_MINT"]));
+const rewardTokenMint = new PublicKey(requiredAny(["REWARD_TOKEN_MINT", "PUMP_MINT", "MCDX_MINT"]));
+
 export const config = {
   heliusRpcUrl: required("HELIUS_RPC_URL"),
-  mcjobMint: new PublicKey(required("MCJOB_MINT")),
-  mcdxMint: new PublicKey(required("MCDX_MINT")),
+  sourceTokenMint,
+  rewardTokenMint,
+  mcjobMint: sourceTokenMint,
+  mcdxMint: rewardTokenMint,
   usdcMint: new PublicKey(process.env.USDC_MINT?.trim() || "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
   treasuryBase: (process.env.TREASURY_BASE?.trim() || "SOL") as TreasuryBase,
   supabaseUrl: required("SUPABASE_URL"),
@@ -63,7 +76,7 @@ export const config = {
   gasBufferSol: numberEnv("GAS_BUFFER_SOL", numberEnv("SOL_RESERVE", 0.05)),
   airdropBatchSize: Math.max(1, Math.floor(numberEnv("AIRDROP_BATCH_SIZE", 4))),
   airdropSolReserve: numberEnv("AIRDROP_SOL_RESERVE", numberEnv("GAS_BUFFER_SOL", numberEnv("SOL_RESERVE", 0.05))),
-  maxHolderPct: numberEnv("MAX_HOLDER_PCT", 4),
+  maxHolderPct: numberEnv("MAX_HOLDER_PCT", 5),
   excludeWallets: publicKeyList("EXCLUDE_WALLETS")
 };
 
