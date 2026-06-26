@@ -3,7 +3,6 @@ import bs58 from "bs58";
 import { Keypair, PublicKey } from "@solana/web3.js";
 
 export type DistributionMode = "proportional" | "equal";
-export type TreasuryBase = "SOL" | "USDC";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -61,8 +60,6 @@ export const config = {
   rewardTokenMint,
   mcjobMint: sourceTokenMint,
   mcdxMint: rewardTokenMint,
-  usdcMint: new PublicKey(process.env.USDC_MINT?.trim() || "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
-  treasuryBase: (process.env.TREASURY_BASE?.trim() || "SOL") as TreasuryBase,
   supabaseUrl: required("SUPABASE_URL"),
   supabaseServiceRole: required("SUPABASE_SERVICE_ROLE"),
   claimEnabled: bool("CLAIM_ENABLED", false),
@@ -79,10 +76,6 @@ export const config = {
   maxHolderPct: numberEnv("MAX_HOLDER_PCT", 5),
   excludeWallets: publicKeyList("EXCLUDE_WALLETS")
 };
-
-if (!["SOL", "USDC"].includes(config.treasuryBase)) {
-  throw new Error("TREASURY_BASE must be SOL or USDC");
-}
 
 if (!["proportional", "equal"].includes(config.distributionMode)) {
   throw new Error("DISTRIBUTION_MODE must be proportional or equal");
