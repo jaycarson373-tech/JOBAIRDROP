@@ -53,7 +53,7 @@ export async function treasuryBaseState(): Promise<{
 async function jupiterSwap(inputMint: string, baseAmount: bigint, treasuryPublicKey: string) {
   const query = new URLSearchParams({
     inputMint,
-    outputMint: config.mcdxMint.toBase58(),
+    outputMint: config.rewardTokenMint.toBase58(),
     amount: baseAmount.toString(),
     slippageBps: String(config.swapSlippageBps),
     restrictIntermediateTokens: "true"
@@ -87,7 +87,7 @@ export async function buyMcdx(epochId: string): Promise<BuyResult> {
 
   const { quote, swap } = await jupiterSwap(inputMint, available, treasury.publicKey.toBase58());
   const outAmount = BigInt(quote.outAmount);
-  console.log(`[${epochId}] ${config.buyEnabled ? "" : "[DRY-RUN] "}would buy ${outAmount.toString()} raw MCDx for ${available.toString()} lamports`);
+  console.log(`[${epochId}] ${config.buyEnabled ? "" : "[DRY-RUN] "}would buy ${outAmount.toString()} raw reward tokens for ${available.toString()} base units`);
 
   if (!config.buyEnabled) {
     return { baseSpent: available, mcdxReceived: outAmount, txSig: null };

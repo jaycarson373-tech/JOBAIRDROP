@@ -1,4 +1,4 @@
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { LAMPORTS_PER_SOL, PublicKey, Transaction } from "@solana/web3.js";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
@@ -16,6 +16,11 @@ import type { Holder } from "./snapshot.js";
 export type Allocation = {
   wallet: string;
   amount: bigint;
+};
+
+type PreparedAllocation = Allocation & {
+  owner: PublicKey;
+  destinationAta: PublicKey;
 };
 
 async function tokenProgramForMint(mint: PublicKey) {
@@ -42,15 +47,30 @@ export function computeAllocations(holders: Holder[], mcdxRaw: bigint): Allocati
     .filter((row) => row.amount > 0n);
 }
 
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function missingAtaRentLamports(atas: PublicKey[]) {
+  const accounts = await connection.getMultipleAccountsInfo(atas, "confirmed");
+  const missingCount = accounts.filter((account) => account === null).length;
+  const rent = await connection.getMinimumBalanceForRentExemption(165);
+  return BigInt(missingCount * rent);
+}
+
 export async function airdropMcdx(epochId: string, allocations: Allocation[]) {
   const treasury = treasuryKeypair();
-  const tokenProgram = await tokenProgramForMint(config.mcdxMint);
-  const mintInfo = await getMint(connection, config.mcdxMint, "confirmed", tokenProgram);
-  const sourceAta = getAssociatedTokenAddressSync(config.mcdxMint, treasury.publicKey, false, tokenProgram);
+  const tokenProgram = await tokenProgramForMint(config.rewardTokenMint);
+  const mintInfo = await getMint(connection, config.rewardTokenMint, "confirmed", tokenProgram);
+  const sourceAta = getAssociatedTokenAddressSync(config.rewardTokenMint, treasury.publicKey, false, tokenProgram);
 
   console.log(`[${epochId}] proof before send: ${allocations.length} payouts`);
   for (const allocation of allocations) {
-    console.log(`[${epochId}] ${config.airdropEnabled ? "" : "[DRY-RUN] "}would send ${allocation.amount.toString()} raw MCDx to ${allocation.wallet}`);
+    console.log(`[${epochId}] ${config.airdropEnabled ? "" : "[DRY-RUN] "}would send ${allocation.amount.toString()} raw reward tokens to ${allocation.wallet}`);
   }
 
   if (!config.airdropEnabled) {
@@ -60,32 +80,65 @@ export async function airdropMcdx(epochId: string, allocations: Allocation[]) {
     return [];
   }
 
+  const prepared: PreparedAllocation[] = allocations.map((allocation) => {
+    const owner = new PublicKey(allocation.wallet);
+    return {
+      ...allocation,
+      owner,
+      destinationAta: getAssociatedTokenAddressSync(config.rewardTokenMint, owner, true, tokenProgram, ASSOCIATED_TOKEN_PROGRAM_ID)
+    };
+  });
+
   const signatures: string[] = [];
-  for (const allocation of allocations) {
-    await planPayout(epochId, allocation.wallet, allocation.amount.toString());
-    try {
-      const owner = new PublicKey(allocation.wallet);
-      const destinationAta = getAssociatedTokenAddressSync(config.mcdxMint, owner, true, tokenProgram, ASSOCIATED_TOKEN_PROGRAM_ID);
-      const tx = new Transaction().add(
-        createAssociatedTokenAccountIdempotentInstruction(
-          treasury.publicKey,
-          destinationAta,
-          owner,
-          config.mcdxMint,
-          tokenProgram,
-          ASSOCIATED_TOKEN_PROGRAM_ID
-        ),
-        createTransferCheckedInstruction(
-          sourceAta,
-          config.mcdxMint,
-          destinationAta,
-          treasury.publicKey,
-          allocation.amount,
-          mintInfo.decimals,
-          [],
-          tokenProgram
-        )
+  const batches = chunk(prepared, config.airdropBatchSize);
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+    const batch = batches[batchIndex];
+    const reserveLamports = BigInt(Math.floor(config.airdropSolReserve * LAMPORTS_PER_SOL));
+    const estimatedRentLamports = await missingAtaRentLamports(batch.map((allocation) => allocation.destinationAta));
+    const estimatedFeeLamports = 10_000n;
+    const requiredLamports = reserveLamports + estimatedRentLamports + estimatedFeeLamports;
+    const balanceLamports = BigInt(await connection.getBalance(treasury.publicKey, "confirmed"));
+
+    if (balanceLamports < requiredLamports) {
+      const error = new Error(
+        `Treasury SOL below airdrop reserve: balance=${balanceLamports}, required=${requiredLamports}, reserve=${reserveLamports}, estimatedAtaRent=${estimatedRentLamports}`
       );
+      console.error(`[${epochId}] stopping airdrop batch: ${error.message}`);
+      const remaining = batches.slice(batchIndex).flat();
+      for (const allocation of remaining) {
+        await failPayout(epochId, allocation.wallet, error);
+      }
+      break;
+    }
+
+    for (const allocation of batch) {
+      await planPayout(epochId, allocation.wallet, allocation.amount.toString());
+    }
+
+    try {
+      const tx = new Transaction();
+      for (const allocation of batch) {
+        tx.add(
+          createAssociatedTokenAccountIdempotentInstruction(
+            treasury.publicKey,
+            allocation.destinationAta,
+            allocation.owner,
+            config.rewardTokenMint,
+            tokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
+          ),
+          createTransferCheckedInstruction(
+            sourceAta,
+            config.rewardTokenMint,
+            allocation.destinationAta,
+            treasury.publicKey,
+            allocation.amount,
+            mintInfo.decimals,
+            [],
+            tokenProgram
+          )
+        );
+      }
       tx.feePayer = treasury.publicKey;
       tx.recentBlockhash = (await connection.getLatestBlockhash("confirmed")).blockhash;
       tx.sign(treasury);
@@ -95,12 +148,16 @@ export async function airdropMcdx(epochId: string, allocations: Allocation[]) {
       }
       const txSig = await connection.sendRawTransaction(tx.serialize(), { maxRetries: 3, skipPreflight: false });
       await connection.confirmTransaction(txSig, "confirmed");
-      await settlePayout(epochId, allocation.wallet, txSig);
-      console.log(`[${epochId}] settled ${allocation.wallet}: ${txSig}`);
+      for (const allocation of batch) {
+        await settlePayout(epochId, allocation.wallet, txSig);
+        console.log(`[${epochId}] settled ${allocation.wallet}: ${txSig}`);
+      }
       signatures.push(txSig);
     } catch (error) {
-      await failPayout(epochId, allocation.wallet, error);
-      console.error(`[${epochId}] payout failed for ${allocation.wallet}:`, error);
+      for (const allocation of batch) {
+        await failPayout(epochId, allocation.wallet, error);
+        console.error(`[${epochId}] payout failed for ${allocation.wallet}:`, error);
+      }
     }
   }
   return signatures;
