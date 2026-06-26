@@ -121,9 +121,9 @@ export async function snapshotEligibleHolders(): Promise<Holder[]> {
 
   if (holders.length > config.maxWalletsPerEpoch) {
     console.warn(
-      `[WARN] ${holders.length} eligible holders exceeds MAX_WALLETS_PER_EPOCH=${config.maxWalletsPerEpoch}; processing all in batches.`
+      `[WARN] ${holders.length} eligible holders exceeds MAX_WALLETS_PER_EPOCH=${config.maxWalletsPerEpoch}; using top ${config.maxWalletsPerEpoch}.`
     );
   }
 
-  return holders;
+  return holders.slice(0, config.maxWalletsPerEpoch);
 }
